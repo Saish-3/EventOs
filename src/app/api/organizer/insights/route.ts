@@ -1,0 +1,2 @@
+import { NextResponse } from 'next/server'; import { getCrowd } from '@/services/crowd.service';
+export async function GET(){const c=getCrowd();const busy=c.filter(x=>x.level==='BUSY'||x.level==='CRITICAL');return NextResponse.json({success:true,data:{registered:8420,checkedIn:6170,currentInside:5830,occupancy:68,activeAlerts:1,busiestZones:busy.slice(0,5),insight:busy.length?`${busy[0].name} is becoming a pressure point. Consider redirecting attendees toward lower-density zones.`:'No critical crowd pressure detected.',foodDemand:73,networkingRequests:46},simulated:true});}

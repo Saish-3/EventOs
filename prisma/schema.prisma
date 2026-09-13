@@ -1,0 +1,371 @@
+// ============================================================
+// EventOS — Prisma Schema
+// Database: SQLite (local dev) — designed for Postgres migration
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ────────────────────────────────────────────────────────────
+// AUTHENTICATION & USERS
+// ────────────────────────────────────────────────────────────
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  role          String   @default("ATTENDEE") // ATTENDEE | ORGANIZER
+  company       String?
+  jobTitle      String?
+  bio           String?
+  interests     String?  // JSON array as string for SQLite
+  eventGoals    String?  // JSON array as string for SQLite
+  linkedinUrl   String?
+  avatarUrl     String?
+  isSimulated   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  registrations   EventRegistration[]
+  sessionBookings SessionBooking[]
+}
+
+// ────────────────────────────────────────────────────────────
+// EVENT
+// ────────────────────────────────────────────────────────────
+
+model Event {
+  id                      String   @id @default(cuid())
+  name                    String
+  slug                    String   @unique
+  description             String
+  theme                   String?
+  startDate               DateTime
+  endDate                 DateTime
+  status                  String   @default("UPCOMING") // UPCOMING | LIVE | ENDED
+  estimatedCapacity       Int?
+  simulatedLiveAttendance Int?
+  organizerName           String?
+  websiteUrl              String?
+  logoUrl                 String?
+
+  // Source attribution
+  sourceUrl   String?
+  sourceName  String?
+  isSimulated Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  venue         Venue?
+  sessions      Session[]
+  masterclasses Masterclass[]
+  passTypes     PassType[]
+  registrations EventRegistration[]
+  companies     Company[]
+  foodVendors   FoodVendor[]
+  crowdSnapshots CrowdSnapshot[]
+}
+
+// ────────────────────────────────────────────────────────────
+// VENUE & ZONES
+// ────────────────────────────────────────────────────────────
+
+model Venue {
+  id          String  @id @default(cuid())
+  name        String
+  address     String
+  city        String
+  state       String?
+  country     String  @default("IN")
+  floorCount  Int     @default(1)
+  mapImageUrl String?
+  mapDisclaimer String @default("Simplified digital venue map — not to scale.")
+
+  // Source attribution
+  sourceUrl   String?
+  sourceName  String?
+  isSimulated Boolean @default(false)
+
+  eventId String @unique
+  event   Event  @relation(fields: [eventId], references: [id])
+
+  zones VenueZone[]
+}
+
+model VenueZone {
+  id          String  @id @default(cuid())
+  zoneNumber  Int
+  name        String
+  subtitle    String?
+  description String?
+  type        String  // entrance | registration | hangout | stage | lounge | food | masterclass | startup_showcase | sponsor | job_fair | exit
+  floor       Int     @default(1)
+  x           Float   @default(0) // Simplified grid X coordinate
+  y           Float   @default(0) // Simplified grid Y coordinate
+  capacity    Int?
+  accessible  Boolean @default(true)
+  crowdLevel  String  @default("LOW") // LOW | MODERATE | BUSY | CRITICAL
+
+  // Source attribution
+  sourceUrl   String?
+  sourceName  String?
+  isSimulated Boolean @default(false)
+
+  venueId String
+  venue   Venue  @relation(fields: [venueId], references: [id])
+
+  sessions      Session[]
+  masterclasses Masterclass[]
+  companies     Company[]
+  foodVendors   FoodVendor[]
+  crowdSnapshots CrowdSnapshot[]
+
+  // Navigation edges (from this zone)
+  edgesFrom VenueEdge[] @relation("EdgeFrom")
+  edgesTo   VenueEdge[] @relation("EdgeTo")
+}
+
+/// Navigation graph edge between two venue zones.
+/// Used for A* pathfinding. Costs are simplified estimates.
+model VenueEdge {
+  id             String  @id @default(cuid())
+  fromZoneId     String
+  toZoneId       String
+  weight         Float   @default(1.0) // Base traversal cost (minutes)
+  crowdMultiplier Float  @default(1.0) // Dynamic cost modifier
+  accessible     Boolean @default(true) // Wheelchair-accessible route?
+  isSimulated    Boolean @default(true)
+
+  fromZone VenueZone @relation("EdgeFrom", fields: [fromZoneId], references: [id])
+  toZone   VenueZone @relation("EdgeTo", fields: [toZoneId], references: [id])
+
+  @@unique([fromZoneId, toZoneId])
+}
+
+// ────────────────────────────────────────────────────────────
+// SESSIONS (Main Stage Programming)
+// ────────────────────────────────────────────────────────────
+
+model Session {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  date        DateTime // The day of the session
+  startTime   String   // "11:40 AM" — stored as display string
+  endTime     String   // "12:10 PM"
+  speaker     String?
+  speakerRole String?
+  company     String?
+  sessionType String   @default("TALK") // TALK | PANEL | FIRESIDE | KEYNOTE | WORKSHOP | INAUGURAL
+  track       String?  // AI | FINTECH | STARTUP | PRODUCT | ENGINEERING
+  tags        String?  // JSON array as string
+
+  // Source attribution
+  sourceUrl   String?
+  sourceName  String?
+  isSimulated Boolean @default(false)
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id])
+
+  venueZoneId String?
+  venueZone   VenueZone? @relation(fields: [venueZoneId], references: [id])
+
+  bookings SessionBooking[]
+}
+
+// ────────────────────────────────────────────────────────────
+// MASTERCLASSES
+// ────────────────────────────────────────────────────────────
+
+model Masterclass {
+  id               String   @id @default(cuid())
+  title            String
+  description      String?
+  speaker          String
+  speakerRole      String?
+  organization     String?
+  date             DateTime
+  startTime        String
+  endTime          String
+  sessionCapacity  Int?     // Limited seats
+  registeredCount  Int      @default(0)
+  registrationUrl  String?
+
+  // Source attribution
+  sourceUrl   String?
+  sourceName  String?
+  isSimulated Boolean @default(false)
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id])
+
+  venueZoneId String?
+  venueZone   VenueZone? @relation(fields: [venueZoneId], references: [id])
+}
+
+// ────────────────────────────────────────────────────────────
+// PASS TYPES
+// ────────────────────────────────────────────────────────────
+
+model PassType {
+  id                String  @id @default(cuid())
+  name              String
+  price             Float
+  currency          String  @default("INR")
+  foodIncluded      Boolean @default(false)
+  networkingAccess  Boolean @default(false)
+  masterclassAccess Boolean @default(true)
+  jobFairAccess     Boolean @default(true)
+  ventureArenaAccess Boolean @default(true)
+  awardsAccess      Boolean @default(false)
+  afterPartyAccess  Boolean @default(false)
+  mainStageAccess   Boolean @default(true)
+  merchIncluded     Boolean @default(false)
+  approvalRequired  Boolean @default(false)
+  dayRestriction    String? // null = both days, "DAY_1", "DAY_2"
+  notes             String?
+
+  // Source attribution
+  sourceUrl   String?
+  sourceName  String?
+  isSimulated Boolean @default(false)
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id])
+
+  registrations EventRegistration[]
+}
+
+// ────────────────────────────────────────────────────────────
+// EVENT REGISTRATION (Attendee ↔ Event)
+// ────────────────────────────────────────────────────────────
+
+model EventRegistration {
+  id           String   @id @default(cuid())
+  registeredAt DateTime @default(now())
+  checkedIn    Boolean  @default(false)
+  checkedInAt  DateTime?
+  qrCode       String?  @unique
+
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+
+  eventId    String
+  event      Event    @relation(fields: [eventId], references: [id])
+
+  passTypeId String?
+  passType   PassType? @relation(fields: [passTypeId], references: [id])
+
+  @@unique([userId, eventId])
+}
+
+// ────────────────────────────────────────────────────────────
+// SESSION BOOKING (Attendee ↔ Session)
+// ────────────────────────────────────────────────────────────
+
+model SessionBooking {
+  id        String   @id @default(cuid())
+  status    String   @default("BOOKED") // BOOKED | ATTENDED | CANCELLED
+  bookedAt  DateTime @default(now())
+
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+
+  sessionId String
+  session   Session @relation(fields: [sessionId], references: [id])
+
+  @@unique([userId, sessionId])
+}
+
+// ────────────────────────────────────────────────────────────
+// COMPANIES (Startup Showcase + Job Fair)
+// ────────────────────────────────────────────────────────────
+
+model Company {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  category    String  // STARTUP_SHOWCASE | JOB_FAIR | SPONSOR | PARTNER
+  sector      String? // AI | FINTECH | HEALTHTECH | EDTECH | SAAS | etc.
+  website     String?
+  logoUrl     String?
+  hiringRoles String? // JSON array for job fair companies
+
+  // Source attribution
+  sourceUrl   String?
+  sourceName  String?
+  isSimulated Boolean @default(false)
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id])
+
+  venueZoneId String?
+  venueZone   VenueZone? @relation(fields: [venueZoneId], references: [id])
+}
+
+// ────────────────────────────────────────────────────────────
+// FOOD (EventOS Smart Food — Prototype Feature)
+// ────────────────────────────────────────────────────────────
+
+model FoodVendor {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  cuisine     String?
+  isDemo      Boolean @default(true) // Always true unless verified from official data
+
+  // Source attribution
+  sourceUrl   String?
+  sourceName  String?
+  isSimulated Boolean @default(true)
+
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id])
+
+  venueZoneId String?
+  venueZone   VenueZone? @relation(fields: [venueZoneId], references: [id])
+
+  items FoodItem[]
+}
+
+model FoodItem {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  price       Float
+  currency    String  @default("INR")
+  category    String  // VEG | NON_VEG | BEVERAGE | SNACK
+  available   Boolean @default(true)
+  prepTime    Int     @default(10) // minutes
+  isSimulated Boolean @default(true)
+
+  vendorId String
+  vendor   FoodVendor @relation(fields: [vendorId], references: [id])
+}
+
+// ────────────────────────────────────────────────────────────
+// CROWD INTELLIGENCE (Simulated)
+// ────────────────────────────────────────────────────────────
+
+model CrowdSnapshot {
+  id          String   @id @default(cuid())
+  timestamp   DateTime @default(now())
+  level       String   // LOW | MODERATE | BUSY | CRITICAL
+  count       Int?     // Simulated headcount
+  isSimulated Boolean  @default(true)
+
+  eventId     String
+  event       Event    @relation(fields: [eventId], references: [id])
+
+  venueZoneId String
+  venueZone   VenueZone @relation(fields: [venueZoneId], references: [id])
+}
